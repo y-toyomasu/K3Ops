@@ -1,0 +1,25 @@
+services:
+  k3ops:
+    build:
+      context: .
+    environment:
+      K3OPS_ROADMAP_PATH: /data/roadmap/development-operations.toml
+      K3OPS_TASKS_DIR: /data/tasks
+    ports:
+      - "0.0.0.0:8890:8890"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - type: bind
+        source: ${K3OPS_MANAGEMENT_ROOT:-../..}/project-management/roadmaps/development-operations.toml
+        target: /data/roadmap/development-operations.toml
+        read_only: true
+      - type: bind
+        source: ${K3OPS_MANAGEMENT_ROOT:-../..}/tasks
+        target: /data/tasks
+        read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
