@@ -65,6 +65,7 @@
     .status-CLAIMED, .status-IMPLEMENTING { border-color: #3a6ca7; color: #8fc3ff; }
     .progress { color: var(--muted); font-size: .76rem; }
     .empty-state { padding: 34px 22px; border: 1px dashed #41526b; border-radius: 16px; color: var(--muted); text-align: center; }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; } .filters label { display:grid; gap:4px; color:var(--muted); font-size:.74rem; font-weight:700; } .filters input,.filters select { min-width: 132px; padding:8px; border:1px solid var(--line); border-radius:8px; background:#0a1525; color:var(--text); } .refresh-state { color:var(--muted); font-size:.78rem; } .is-hidden { display:none !important; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); }
     table { width: 100%; min-width: 900px; border-collapse: collapse; }
     th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -119,13 +120,14 @@
 
     <section class="section" aria-labelledby="roadmap-title">
       <div class="section-heading"><h2 id="roadmap-title">Development Operations Roadmap</h2><span class="section-note">DONE count / related tasks</span></div>
+      <div class="filters" aria-label="Roadmap filters"><label>Search roadmap<input id="roadmap-search" type="search" autocomplete="off"></label><label>Workstream<select id="workstream-filter"><option value="">All</option>{% for workstream in dashboard.roadmap %}<option value="{{ workstream.id }}">{{ workstream.name }}</option>{% endfor %}</select></label><label>Horizon<select id="horizon-filter"><option value="">All</option><option>now</option><option>next</option><option>later</option><option>ongoing</option></select></label></div><p id="roadmap-empty" class="empty-state is-hidden">条件に一致するRoadmap Itemはありません。</p>
       {% if summary.roadmap_items %}
         {% for workstream in dashboard.roadmap %}
-        <article class="workstream">
+        <article class="workstream" data-workstream="{{ workstream.id }}">
           <h3 class="workstream-title">{{ workstream.name }}</h3>
           <div class="roadmap-grid">
             {% for item in workstream["items"] %}
-            <div class="roadmap-card">
+            <div class="roadmap-card" data-roadmap-item="{{ item.name }} {{ item.purpose }} {{ item.tasks|map(attribute='id')|join(' ') }}" data-horizon="{{ item.horizon }}">
               <div class="card-top">
                 <span class="horizon">{{ item.horizon }}</span>
                 {% if item.planned %}<span class="status-label">PLANNED</span>{% elif item.complete %}<span class="status-label status-DONE">COMPLETE</span>{% else %}<span class="progress">{{ item.done_count }}/{{ item.task_count }} DONE</span>{% endif %}
@@ -148,12 +150,13 @@
     <section class="section" aria-labelledby="tasks-title">
       <div class="section-heading"><h2 id="tasks-title">Tasks</h2><span class="section-note">Allowlisted metadata only · {{ dashboard.tasks|length }} tasks</span></div>
       {% if dashboard.tasks %}
+      <div class="filters" aria-label="Task filters"><label>Search tasks<input id="task-search" type="search" autocomplete="off"></label><label>Status<select id="status-filter"><option value="">All</option>{% for status in ['DESIGN','READY','CLAIMED','IMPLEMENTING','GUI_REVIEW','ACCEPTANCE_REVIEW','DONE','BLOCKED'] %}<option>{{ status }}</option>{% endfor %}</select></label><label>Priority<select id="priority-filter"><option value="">All</option>{% for priority in dashboard.tasks|map(attribute='priority')|unique|sort %}<option>{{ priority }}</option>{% endfor %}</select></label></div><p id="task-empty" class="empty-state is-hidden">条件に一致するTaskはありません。</p>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Task</th><th>Title</th><th>Status</th><th>Priority</th><th>Dependencies</th><th>Claimed by</th><th>Claimed at</th></tr></thead>
           <tbody>
           {% for task in dashboard.tasks %}
-            <tr>
+            <tr data-task-id="{{ task.id }}" data-task-search="{{ task.id }} {{ task.title }}" data-status="{{ task.status }}" data-priority="{{ task.priority }}">
               <td class="task-id">{{ task.id }}</td>
               <td>{{ task.title }}</td>
               <td><span class="status-label status-{{ task.status }}">{{ task.status }}</span></td>
@@ -169,7 +172,16 @@
       {% else %}<div class="empty-state">表示可能なTask Metadataはありません。</div>{% endif %}
     </section>
 
-    <footer>K3Ops Safe MVP · read-only · no task, agent, Git, or document mutations</footer>
+    <footer>K3Ops Safe MVP · read-only · no task, agent, Git, or document mutations<br><span id="refresh-state" class="refresh-state">60秒ごとに更新します。Background TabではBrowserのTimer制御により厳密な間隔は保証されません。</span></footer>
   </main>
+  <script nonce="{{ script_nonce }}">
+    (() => {
+      const query = (id) => document.getElementById(id); const state = query('refresh-state'); let inFlight = false;
+      const matches = (value, search) => value.toLowerCase().includes(search.toLowerCase());
+      function filters() { const rs=query('roadmap-search').value, ws=query('workstream-filter').value, h=query('horizon-filter').value; let roadmap=0; document.querySelectorAll('.roadmap-card').forEach(card => { const visible=matches(card.dataset.roadmapItem,rs) && (!h || card.dataset.horizon===h) && (!ws || card.closest('.workstream').dataset.workstream===ws); card.classList.toggle('is-hidden',!visible); roadmap += visible; }); query('roadmap-empty').classList.toggle('is-hidden',roadmap>0); const ts=query('task-search').value, status=query('status-filter').value, priority=query('priority-filter').value; const rows=[...document.querySelectorAll('tbody tr')].sort((a,b)=>Number(b.dataset.taskId.slice(2))-Number(a.dataset.taskId.slice(2))); rows.forEach(row=>{ row.parentElement.append(row); const visible=matches(row.dataset.taskSearch,ts)&&(!status||row.dataset.status===status)&&(!priority||row.dataset.priority===priority); row.classList.toggle('is-hidden',!visible); }); query('task-empty').classList.toggle('is-hidden',rows.some(row=>!row.classList.contains('is-hidden'))); }
+      async function refresh() { if (inFlight) return; inFlight=true; state.textContent='更新中…'; try { const response=await fetch('/api/dashboard',{cache:'no-store'}); if(!response.ok) throw new Error(); const latest=await response.json(); if (JSON.stringify(latest)!==JSON.stringify({{ dashboard|tojson }})) { location.reload(); return; } state.textContent=`更新済み · ${new Date().toLocaleTimeString('ja-JP')}`; } catch (_) { state.textContent='更新失敗 · 最終正常表示を維持しています（stale）'; } finally { inFlight=false; } }
+      document.querySelectorAll('.filters input,.filters select').forEach(item=>{item.addEventListener('input',filters);item.addEventListener('change',filters)}); filters(); setInterval(refresh,60000); document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh();});
+    })();
+  </script>
 </body>
 </html>

@@ -43,6 +43,8 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/")
         self.assertEqual("no-store", response.headers["Cache-Control"])
         self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
+        self.assertIn("script-src 'nonce-", response.headers["Content-Security-Policy"])
+        self.assertIn("connect-src 'self'", response.headers["Content-Security-Policy"])
         self.assertEqual("nosniff", response.headers["X-Content-Type-Options"])
         self.assertEqual("DENY", response.headers["X-Frame-Options"])
 
@@ -90,7 +92,16 @@ class ApiTests(unittest.TestCase):
         self.assertIn("DONE", html)
         self.assertIn("PLANNED", html)
         self.assertNotIn("private-body-marker", html)
-        self.assertNotIn("<script", html)
+        self.assertIn('id="roadmap-search"', html)
+        self.assertIn('id="task-search"', html)
+        self.assertIn('id="refresh-state"', html)
+        self.assertIn("setInterval(refresh,60000)", html)
+        self.assertIn("visibilitychange", html)
+        self.assertIn("if (inFlight) return", html)
+        self.assertIn("最終正常表示を維持しています（stale）", html)
+        self.assertIn("task-empty').classList.toggle('is-hidden',rows.some", html)
+        self.assertIn("nonce=", html)
+        self.assertNotIn("private-body-marker", html)
 
     def test_empty_and_warning_states_render(self):
         for path in self.tasks.iterdir():
