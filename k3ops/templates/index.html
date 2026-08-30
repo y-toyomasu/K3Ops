@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>K3Ops · Development Operations</title>
+  <title>K3Ops · Product and Development Operations</title>
   <style>
     :root {
       color-scheme: dark;
@@ -91,21 +91,72 @@
       <div>
         <p class="eyebrow">Read-only operations view</p>
         <h1>K3Ops</h1>
-        <p class="lede">Development Operations RoadmapとTask Lifecycleの、安全な集計Snapshotです。Browser Reload時に管理ファイルを再読込します。</p>
+        <p class="lede">Product RoadmapとDevelopment Operations Roadmapを分離した、安全なread-only集計Snapshotです。</p>
       </div>
       <span class="live-mark">Process live · Data {{ dashboard.data_status }}</span>
     </header>
 
     {% if dashboard.warnings %}
-    <aside class="warning-banner" aria-labelledby="warning-title">
-      <strong id="warning-title">Data warning · {{ dashboard.warnings|length }}件</strong>
+    <aside id="operations-warning" class="warning-banner" aria-labelledby="warning-title">
+      <strong id="warning-title">Development Operations data warning · {{ dashboard.warnings|length }}件</strong>
       <ul>{% for warning in dashboard.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
     </aside>
     {% endif %}
 
+    {% if dashboard.product_warnings %}
+    <aside id="product-warning" class="warning-banner" aria-labelledby="product-warning-title">
+      <strong id="product-warning-title">Product data warning · {{ dashboard.product_warnings|length }}件</strong>
+      <ul>{% for warning in dashboard.product_warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+    </aside>
+    {% endif %}
+
+    {% set product_summary = dashboard.product_summary %}
+    <section id="product-summary" aria-labelledby="product-summary-title">
+      <div class="section-heading"><h2 id="product-summary-title">Product Summary</h2><span class="section-note">Product Roadmap only · Data {{ dashboard.product_data_status }}</span></div>
+      <div class="summary-grid">
+        <div class="metric"><span class="value">{{ product_summary.roadmap_items }}</span><span class="label">Product items</span></div>
+        <div class="metric"><span class="value">{{ product_summary.completed_items }}</span><span class="label">Completed</span></div>
+        <div class="metric"><span class="value">{{ product_summary.completion_percent }}%</span><span class="label">Completion</span></div>
+        <div class="metric"><span class="value">{{ product_summary.planned_items }}</span><span class="label">Planned</span></div>
+        <div class="metric"><span class="value">{{ product_summary.running_tasks }}</span><span class="label">Running</span></div>
+        <div class="metric"><span class="value">{{ product_summary.review_tasks }}</span><span class="label">In review</span></div>
+        <div class="metric"><span class="value">{{ product_summary.blocked_tasks }}</span><span class="label">Blocked</span></div>
+        <div class="metric"><span class="value">{{ product_summary.warning_count }}</span><span class="label">Warnings</span></div>
+      </div>
+    </section>
+
+    <section id="product-roadmap-section" class="section" aria-labelledby="product-roadmap-title">
+      <div class="section-heading"><h2 id="product-roadmap-title">Product Roadmap</h2><span class="section-note">Independent product delivery view</span></div>
+      <div class="filters" aria-label="Product Roadmap filters"><label>Search product<input id="product-roadmap-search" type="search" autocomplete="off"></label><label>Workstream<select id="product-workstream-filter"><option value="">All</option>{% for workstream in dashboard.product_roadmap %}<option value="{{ workstream.id }}">{{ workstream.name }}</option>{% endfor %}</select></label><label>Horizon<select id="product-horizon-filter"><option value="">All</option><option>now</option><option>next</option><option>later</option><option>ongoing</option></select></label></div><p id="product-roadmap-empty" class="empty-state is-hidden">条件に一致するProduct Roadmap Itemはありません。</p>
+      {% if product_summary.roadmap_items %}
+        {% for workstream in dashboard.product_roadmap %}
+        <article class="workstream product-workstream" data-product-workstream="{{ workstream.id }}">
+          <h3 class="workstream-title">{{ workstream.name }}</h3>
+          <div class="roadmap-grid">
+            {% for item in workstream["items"] %}
+            <div class="roadmap-card product-roadmap-card" data-product-roadmap-item="{{ item.name }} {{ item.purpose }} {{ item.tasks|map(attribute='id')|join(' ') }}" data-product-horizon="{{ item.horizon }}">
+              <div class="card-top">
+                <span class="horizon">{{ item.horizon }}</span>
+                {% if item.planned %}<span class="status-label">PLANNED</span>{% elif item.complete %}<span class="status-label status-DONE">COMPLETE</span>{% else %}<span class="progress">{{ item.done_count }}/{{ item.task_count }} DONE</span>{% endif %}
+              </div>
+              <h3>{{ item.name }}</h3>
+              <p class="purpose">{{ item.purpose }}</p>
+              <div class="task-tags">
+                {% for task in item.tasks %}
+                <span class="tag"><span>{{ task.id }}</span><span class="status-label status-{{ task.status }}">{{ task.status }}</span></span>
+                {% else %}<span class="muted">Task未作成</span>{% endfor %}
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </article>
+        {% endfor %}
+      {% else %}<div class="empty-state">表示可能なProduct Roadmap Itemはありません。</div>{% endif %}
+    </section>
+
     {% set summary = dashboard.summary %}
     <section aria-labelledby="summary-title">
-      <div class="section-heading"><h2 id="summary-title">Summary</h2><span class="section-note">Lifecycle labels are shown as text</span></div>
+      <div class="section-heading"><h2 id="summary-title">Development Operations Summary</h2><span class="section-note">Development Operations and Task metadata</span></div>
       <div class="summary-grid">
         <div class="metric"><span class="value">{{ summary.roadmap_items }}</span><span class="label">Roadmap items</span></div>
         <div class="metric"><span class="value">{{ summary.completed_items }}</span><span class="label">Completed</span></div>
@@ -172,14 +223,14 @@
       {% else %}<div class="empty-state">表示可能なTask Metadataはありません。</div>{% endif %}
     </section>
 
-    <footer>K3Ops Safe MVP · read-only · no task, agent, Git, or document mutations<br><span id="refresh-state" class="refresh-state">60秒ごとに更新します。Background TabではBrowserのTimer制御により厳密な間隔は保証されません。</span></footer>
+    <footer>K3Ops Safe MVP · read-only · no task, agent, Git, or document mutations<br><span id="product-refresh-state" class="refresh-state">Product: 60秒ごとに更新</span><br><span id="refresh-state" class="refresh-state">Development Operations / Tasks: 60秒ごとに更新します。Background TabではBrowserのTimer制御により厳密な間隔は保証されません。</span></footer>
   </main>
   <script nonce="{{ script_nonce }}">
     (() => {
-      const query = (id) => document.getElementById(id); const state = query('refresh-state'); let inFlight = false;
+      const query = (id) => document.getElementById(id); const state = query('refresh-state'); const productState = query('product-refresh-state'); let inFlight = false;
       const matches = (value, search) => value.toLowerCase().includes(search.toLowerCase());
-      function filters() { const rs=query('roadmap-search').value, ws=query('workstream-filter').value, h=query('horizon-filter').value; let roadmap=0; document.querySelectorAll('.roadmap-card').forEach(card => { const visible=matches(card.dataset.roadmapItem,rs) && (!h || card.dataset.horizon===h) && (!ws || card.closest('.workstream').dataset.workstream===ws); card.classList.toggle('is-hidden',!visible); roadmap += visible; }); query('roadmap-empty').classList.toggle('is-hidden',roadmap>0); const ts=query('task-search').value, status=query('status-filter').value, priority=query('priority-filter').value; const rows=[...document.querySelectorAll('tbody tr')].sort((a,b)=>Number(b.dataset.taskId.slice(2))-Number(a.dataset.taskId.slice(2))); rows.forEach(row=>{ row.parentElement.append(row); const visible=matches(row.dataset.taskSearch,ts)&&(!status||row.dataset.status===status)&&(!priority||row.dataset.priority===priority); row.classList.toggle('is-hidden',!visible); }); query('task-empty').classList.toggle('is-hidden',rows.some(row=>!row.classList.contains('is-hidden'))); }
-      async function refresh() { if (inFlight) return; inFlight=true; state.textContent='更新中…'; try { const response=await fetch('/api/dashboard',{cache:'no-store'}); if(!response.ok) throw new Error(); const latest=await response.json(); if (JSON.stringify(latest)!==JSON.stringify({{ dashboard|tojson }})) { location.reload(); return; } state.textContent=`更新済み · ${new Date().toLocaleTimeString('ja-JP')}`; } catch (_) { state.textContent='更新失敗 · 最終正常表示を維持しています（stale）'; } finally { inFlight=false; } }
+      function filters() { const prs=query('product-roadmap-search').value, pws=query('product-workstream-filter').value, ph=query('product-horizon-filter').value; let product=0; const productCards=[...document.querySelectorAll('.product-roadmap-card')]; productCards.forEach(card => { const visible=matches(card.dataset.productRoadmapItem,prs) && (!ph || card.dataset.productHorizon===ph) && (!pws || card.closest('.product-workstream').dataset.productWorkstream===pws); card.classList.toggle('is-hidden',!visible); product += visible; }); document.querySelectorAll('.product-workstream').forEach(workstream=>workstream.classList.toggle('is-hidden',![...workstream.querySelectorAll('.product-roadmap-card')].some(card=>!card.classList.contains('is-hidden')))); query('product-roadmap-empty').classList.toggle('is-hidden',product>0||productCards.length===0); const rs=query('roadmap-search').value, ws=query('workstream-filter').value, h=query('horizon-filter').value; let roadmap=0; document.querySelectorAll('.roadmap-card:not(.product-roadmap-card)').forEach(card => { const visible=matches(card.dataset.roadmapItem,rs) && (!h || card.dataset.horizon===h) && (!ws || card.closest('.workstream').dataset.workstream===ws); card.classList.toggle('is-hidden',!visible); roadmap += visible; }); query('roadmap-empty').classList.toggle('is-hidden',roadmap>0); const taskSearch=query('task-search'); if(taskSearch){ const ts=taskSearch.value, status=query('status-filter').value, priority=query('priority-filter').value; const rows=[...document.querySelectorAll('tbody tr')].sort((a,b)=>Number(b.dataset.taskId.slice(2))-Number(a.dataset.taskId.slice(2))); rows.forEach(row=>{ row.parentElement.append(row); const visible=matches(row.dataset.taskSearch,ts)&&(!status||row.dataset.status===status)&&(!priority||row.dataset.priority===priority); row.classList.toggle('is-hidden',!visible); }); query('task-empty').classList.toggle('is-hidden',rows.some(row=>!row.classList.contains('is-hidden'))); } }
+      async function refresh() { if (inFlight) return; inFlight=true; state.textContent='Development Operations / Tasks: 更新中…'; productState.textContent='Product: 更新中…'; try { const response=await fetch('/api/dashboard',{cache:'no-store'}); if(!response.ok) throw new Error(); const latest=await response.json(); if (JSON.stringify(latest)!==JSON.stringify({{ dashboard|tojson }})) { location.reload(); return; } const updated=new Date().toLocaleTimeString('ja-JP'); state.textContent=`Development Operations / Tasks: 更新済み · ${updated}`; productState.textContent=`Product: 更新済み · ${updated}`; } catch (_) { state.textContent='Development Operations / Tasks: 更新失敗 · 最終正常表示を維持しています（stale）'; productState.textContent='Product: 更新失敗 · 最終正常表示を維持しています（stale）'; } finally { inFlight=false; } }
       document.querySelectorAll('.filters input,.filters select').forEach(item=>{item.addEventListener('input',filters);item.addEventListener('change',filters)}); filters(); setInterval(refresh,60000); document.addEventListener('visibilitychange',()=>{if(!document.hidden) refresh();});
     })();
   </script>

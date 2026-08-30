@@ -16,6 +16,9 @@ def create_app(config: dict | None = None) -> Flask:
         ROADMAP_PATH=os.environ.get(
             "K3OPS_ROADMAP_PATH", "/data/roadmap/development-operations.toml"
         ),
+        PRODUCT_ROADMAP_PATH=os.environ.get(
+            "K3OPS_PRODUCT_ROADMAP_PATH", "/data/roadmap/product.toml"
+        ),
         TASKS_DIRECTORY=os.environ.get("K3OPS_TASKS_DIR", "/data/tasks"),
     )
     if config:
@@ -36,7 +39,11 @@ def create_app(config: dict | None = None) -> Flask:
         return response
 
     def dashboard_data() -> dict:
-        return build_dashboard(app.config["ROADMAP_PATH"], app.config["TASKS_DIRECTORY"])
+        return build_dashboard(
+            app.config["ROADMAP_PATH"],
+            app.config["TASKS_DIRECTORY"],
+            app.config["PRODUCT_ROADMAP_PATH"],
+        )
 
     @app.get("/")
     def index():

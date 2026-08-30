@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from k3ops.data import LIFECYCLE_STATUSES, build_dashboard, load_roadmap, load_tasks
@@ -18,6 +20,8 @@ class DataTests(unittest.TestCase):
         self.tasks.mkdir()
         self.roadmap = self.root / "roadmap.toml"
         self.roadmap.write_text(roadmap_toml(), encoding="utf-8")
+        self.product_roadmap = self.root / "product.toml"
+        self.product_roadmap.write_text(roadmap_toml(), encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -190,6 +194,82 @@ class DataTests(unittest.TestCase):
         result = load_tasks(self.tasks)
         self.assertNotIn("T-00002", result.value)
         self.assertIn("UNSAFE_METADATA:T-00002", result.warnings)
+
+    def test_product_and_operations_roadmaps_are_aggregated_independently(self):
+        write_task(self.tasks, "T-00001", "DONE")
+        product_items = [
+            {
+                "id": "product-complete",
+                "horizon": "now",
+                "order": 10,
+                "name": "Product complete",
+                "purpose": "Product-only delivery",
+                "tasks": ["T-00001"],
+            },
+            {
+                "id": "product-planned",
+                "horizon": "next",
+                "order": 20,
+                "name": "Product planned",
+                "purpose": "Product-only future",
+                "tasks": [],
+            },
+        ]
+        self.product_roadmap.write_text(roadmap_toml(product_items), encoding="utf-8")
+        result = build_dashboard(self.roadmap, self.tasks, self.product_roadmap)
+        self.assertEqual(2, result["summary"]["roadmap_items"])
+        self.assertEqual(2, result["product_summary"]["roadmap_items"])
+        self.assertEqual(1, result["product_summary"]["completed_items"])
+        self.assertEqual(1, result["product_summary"]["planned_items"])
+        self.assertEqual("ok", result["product_data_status"])
+        self.assertNotIn("references", repr(result["product_roadmap"]))
+
+    def test_invalid_product_does_not_hide_operations_or_tasks_and_reverse(self):
+        write_task(self.tasks, "T-00001", "DONE")
+        self.product_roadmap.write_text("broken = [toml", encoding="utf-8")
+        product_invalid = build_dashboard(self.roadmap, self.tasks, self.product_roadmap)
+        self.assertEqual(2, product_invalid["summary"]["roadmap_items"])
+        self.assertEqual("T-00001", product_invalid["tasks"][0]["id"])
+        self.assertEqual([], product_invalid["product_roadmap"])
+        self.assertEqual(["PRODUCT_ROADMAP_TOML"], product_invalid["product_warnings"])
+
+        self.product_roadmap.write_text(roadmap_toml(), encoding="utf-8")
+        self.roadmap.write_text("broken = [toml", encoding="utf-8")
+        operations_invalid = build_dashboard(self.roadmap, self.tasks, self.product_roadmap)
+        self.assertEqual([], operations_invalid["roadmap"])
+        self.assertEqual(2, operations_invalid["product_summary"]["roadmap_items"])
+        self.assertEqual("ok", operations_invalid["product_data_status"])
+
+    def test_product_source_failures_are_normalized_and_source_identified(self):
+        missing = load_roadmap(self.root / "missing-product.toml", kind="PRODUCT_ROADMAP")
+        self.assertEqual(("PRODUCT_ROADMAP_UNAVAILABLE",), missing.warnings)
+
+        directory = self.root / "product-directory"
+        directory.mkdir()
+        self.assertEqual(
+            ("PRODUCT_ROADMAP_NOT_REGULAR",),
+            load_roadmap(directory, kind="PRODUCT_ROADMAP").warnings,
+        )
+
+        with patch.object(
+            Path,
+            "lstat",
+            return_value=SimpleNamespace(st_mode=stat.S_IFLNK, st_size=0),
+        ):
+            symlink = load_roadmap(self.product_roadmap, kind="PRODUCT_ROADMAP")
+        self.assertEqual(("PRODUCT_ROADMAP_NOT_REGULAR",), symlink.warnings)
+
+        with patch.object(
+            Path,
+            "lstat",
+            return_value=SimpleNamespace(st_mode=stat.S_IFIFO, st_size=0),
+        ):
+            special = load_roadmap(self.product_roadmap, kind="PRODUCT_ROADMAP")
+        self.assertEqual(("PRODUCT_ROADMAP_NOT_REGULAR",), special.warnings)
+
+        with patch("k3ops.data.MAX_FILE_BYTES", 20):
+            oversized = load_roadmap(self.product_roadmap, kind="PRODUCT_ROADMAP")
+        self.assertEqual(("PRODUCT_ROADMAP_TOO_LARGE",), oversized.warnings)
 
 
 if __name__ == "__main__":

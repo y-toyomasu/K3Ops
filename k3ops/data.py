@@ -118,18 +118,27 @@ def _string_list(value: Any, *, maximum: int, item_code: str) -> list[str]:
     return [_safe_text(item, nonempty=True) for item in value]
 
 
-def load_roadmap(path: str | Path) -> ReadResult:
+def _source_problem(code: str, kind: str) -> str:
+    if kind == "ROADMAP" or code.startswith(f"{kind}_"):
+        return code
+    if code.startswith("ROADMAP_"):
+        return f"{kind}_{code.removeprefix('ROADMAP_')}"
+    return f"{kind}_{code}"
+
+
+def load_roadmap(path: str | Path, *, kind: str = "ROADMAP") -> ReadResult:
     roadmap_path = Path(path)
     try:
-        text = _read_regular_utf8(roadmap_path, "ROADMAP")
+        text = _read_regular_utf8(roadmap_path, kind)
         try:
             raw = tomllib.loads(text)
         except (tomllib.TOMLDecodeError, ValueError) as exc:
-            raise DataProblem("ROADMAP_TOML") from exc
+            raise DataProblem(f"{kind}_TOML") from exc
         roadmap = _validate_roadmap(raw)
         return ReadResult(roadmap, ())
     except DataProblem as problem:
-        return ReadResult({"schema_version": None, "workstreams": []}, (problem.code,))
+        code = _source_problem(problem.code, kind)
+        return ReadResult({"schema_version": None, "workstreams": []}, (code,))
 
 
 def _validate_roadmap(raw: Any) -> dict[str, Any]:
@@ -313,21 +322,26 @@ def _parse_metadata_lines(lines: Iterable[str]) -> dict[str, Any]:
     return metadata
 
 
-def build_dashboard(roadmap_path: str | Path, tasks_directory: str | Path) -> dict[str, Any]:
-    roadmap_result = load_roadmap(roadmap_path)
-    task_result = load_tasks(tasks_directory)
-    warnings = list(roadmap_result.warnings) + list(task_result.warnings)
-    tasks_by_id: dict[str, dict[str, Any]] = task_result.value
+def _aggregate_roadmap(
+    roadmap_result: ReadResult,
+    tasks_by_id: dict[str, dict[str, Any]],
+    *,
+    initial_warnings: Iterable[str] = (),
+    global_task_counts: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[str]]:
+    warnings = list(roadmap_result.warnings) + list(initial_warnings)
     workstreams: list[dict[str, Any]] = []
     item_count = 0
     completed_count = 0
     planned_count = 0
+    related_task_ids: set[str] = set()
 
     for workstream in roadmap_result.value["workstreams"]:
         normalized_items: list[dict[str, Any]] = []
         for item in sorted(workstream["items"], key=lambda current: current["display_order"]):
             item_count += 1
             task_ids = item["task_ids"]
+            related_task_ids.update(task_ids)
             related_tasks: list[dict[str, str]] = []
             done_count = 0
             for task_id in task_ids:
@@ -363,25 +377,59 @@ def build_dashboard(roadmap_path: str | Path, tasks_directory: str | Path) -> di
             {"id": workstream["id"], "name": workstream["name"], "items": normalized_items}
         )
 
-    task_list = sorted(tasks_by_id.values(), key=lambda task: task["id"])
-    running_count = sum(task["status"] in RUNNING_STATUSES for task in task_list)
-    review_count = sum(task["status"] in REVIEW_STATUSES for task in task_list)
-    blocked_count = sum(task["status"] == "BLOCKED" for task in task_list)
+    status_tasks = (
+        list(tasks_by_id.values())
+        if global_task_counts
+        else [tasks_by_id[task_id] for task_id in related_task_ids if task_id in tasks_by_id]
+    )
+    running_count = sum(task["status"] in RUNNING_STATUSES for task in status_tasks)
+    review_count = sum(task["status"] in REVIEW_STATUSES for task in status_tasks)
+    blocked_count = sum(task["status"] == "BLOCKED" for task in status_tasks)
     normalized_warnings = list(dict.fromkeys(warnings))
     completion_percent = round((completed_count / item_count) * 100, 1) if item_count else 0.0
+    summary = {
+        "roadmap_items": item_count,
+        "completed_items": completed_count,
+        "completion_percent": completion_percent,
+        "planned_items": planned_count,
+        "running_tasks": running_count,
+        "review_tasks": review_count,
+        "blocked_tasks": blocked_count,
+        "warning_count": len(normalized_warnings),
+    }
+    return workstreams, summary, normalized_warnings
+
+
+def build_dashboard(
+    roadmap_path: str | Path,
+    tasks_directory: str | Path,
+    product_roadmap_path: str | Path | None = None,
+) -> dict[str, Any]:
+    task_result = load_tasks(tasks_directory)
+    tasks_by_id: dict[str, dict[str, Any]] = task_result.value
+
+    roadmap, summary, warnings = _aggregate_roadmap(
+        load_roadmap(roadmap_path),
+        tasks_by_id,
+        initial_warnings=task_result.warnings,
+        global_task_counts=True,
+    )
+    if product_roadmap_path is None:
+        product_result = ReadResult({"schema_version": None, "workstreams": []}, ())
+    else:
+        product_result = load_roadmap(product_roadmap_path, kind="PRODUCT_ROADMAP")
+    product_roadmap, product_summary, product_warnings = _aggregate_roadmap(
+        product_result, tasks_by_id
+    )
+
     return {
-        "data_status": "warning" if normalized_warnings else "ok",
-        "warnings": normalized_warnings,
-        "summary": {
-            "roadmap_items": item_count,
-            "completed_items": completed_count,
-            "completion_percent": completion_percent,
-            "planned_items": planned_count,
-            "running_tasks": running_count,
-            "review_tasks": review_count,
-            "blocked_tasks": blocked_count,
-            "warning_count": len(normalized_warnings),
-        },
-        "roadmap": workstreams,
-        "tasks": task_list,
+        "data_status": "warning" if warnings else "ok",
+        "warnings": warnings,
+        "summary": summary,
+        "roadmap": roadmap,
+        "tasks": sorted(tasks_by_id.values(), key=lambda task: task["id"]),
+        "product_data_status": "warning" if product_warnings else "ok",
+        "product_warnings": product_warnings,
+        "product_summary": product_summary,
+        "product_roadmap": product_roadmap,
     }

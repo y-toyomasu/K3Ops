@@ -4,6 +4,7 @@ services:
       context: .
     environment:
       K3OPS_ROADMAP_PATH: /data/roadmap/development-operations.toml
+      K3OPS_PRODUCT_ROADMAP_PATH: /data/roadmap/product.toml
       K3OPS_TASKS_DIR: /data/tasks
     ports:
       - "0.0.0.0:8890:8890"
@@ -14,6 +15,10 @@ services:
       - type: bind
         source: ${K3OPS_MANAGEMENT_ROOT:-../..}/project-management/roadmaps/development-operations.toml
         target: /data/roadmap/development-operations.toml
+        read_only: true
+      - type: bind
+        source: ${K3OPS_MANAGEMENT_ROOT:-../..}/project-management/roadmaps/product.toml
+        target: /data/roadmap/product.toml
         read_only: true
       - type: bind
         source: ${K3OPS_MANAGEMENT_ROOT:-../..}/tasks
