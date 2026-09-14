@@ -8,6 +8,14 @@ ComposeはDashboardを`0.0.0.0:8890`で全IPv4 Interfaceへ公開します。認
 
 K3Opsは外部Network、CDN、外部Font、Telemetry、Router Port ForwardまたはFirewall変更を使用しません。UI AssetはApplication内に保持します。
 
+## Codex Agent Observation Hook bundle
+
+`ops/codex-agent-observation/`は、Codexの`SubagentStart`だけを対象にする手動導入用の配布bundleです。配布`hooks.json`とHandler Sourceをプロジェクトの`.codex/`へコピーし、Project Trustを確認する操作はProduct Ownerが手動で行います。K3OpsのGit管理対象にあるbundleを直接有効化したり、実行時コピーを作成したりはしません。
+
+Handlerは公式Hook入力の`model`だけをObserved Modelとして扱います。Reasoning Effortは観測せず、固定の未観測理由を記録します。成功時は固定形式のObservation ReferenceとObserved Modelだけを子Agent contextへ渡します。入力が無効、Hook未導入、Project未信頼、未読込、runtime更新失敗またはHandler失敗でも、SubAgentの起動を妨げず、contextを追加しません。
+
+手動導入後のruntimeはプロジェクト相対の`runtime/agent-observations/`に置かれ、Git管理外です。各recordにはObservation Reference、UTC時刻、Observed Model、固定Observation SourceおよびReasoningの未観測理由だけを残します。Session／Agent識別子、transcript、Prompt、Command／Error本文、Host固有絶対Path、Secret、Credential、Token、Flag、認証情報および非公開思考は保存・出力・引継ぎしません。更新は排他・原子的置換で行い、30日または100件のいずれか早い上限を超える古いrecordを削除します。
+
 ## 起動
 
 管理Repositoryのrootを`<management-root>`とします。K3Ops Repositoryで管理rootを指定して起動します。

@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "SubagentStart": [
+      {
+        "type": "command",
+        "command": "python .codex/codex-agent-observation/handler.py"
+      }
+    ]
+  }
+}
