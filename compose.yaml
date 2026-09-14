@@ -6,6 +6,7 @@ services:
       K3OPS_ROADMAP_PATH: /data/roadmap/development-operations.toml
       K3OPS_PRODUCT_ROADMAP_PATH: /data/roadmap/product.toml
       K3OPS_TASKS_DIR: /data/tasks
+      K3OPS_STORIES_INDEX_PATH: /data/stories/INDEX.md
     ports:
       - "0.0.0.0:8890:8890"
     read_only: true
@@ -23,6 +24,10 @@ services:
       - type: bind
         source: ${K3OPS_MANAGEMENT_ROOT:-../..}/tasks
         target: /data/tasks
+        read_only: true
+      - type: bind
+        source: ${K3OPS_MANAGEMENT_ROOT:-../..}/stories/INDEX.md
+        target: /data/stories/INDEX.md
         read_only: true
     security_opt:
       - no-new-privileges:true

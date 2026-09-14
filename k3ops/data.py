@@ -6,6 +6,7 @@ import os
 import re
 import stat
 import tomllib
+from datetime import date
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -17,6 +18,8 @@ MAX_TASKS = 1024
 MAX_ITEM_TASK_IDS = 64
 MAX_ITEM_REFERENCES = 64
 MAX_STRING_LENGTH = 4096
+MAX_STORIES_FILE_BYTES = 64 * 1024
+MAX_STORIES = 100
 
 HORIZONS = frozenset({"now", "next", "later", "ongoing"})
 LIFECYCLE_STATUSES = frozenset(
@@ -35,6 +38,8 @@ RUNNING_STATUSES = frozenset({"CLAIMED", "IMPLEMENTING"})
 REVIEW_STATUSES = frozenset({"GUI_REVIEW", "ACCEPTANCE_REVIEW"})
 
 TASK_ID_RE = re.compile(r"T-\d{5}")
+STORY_ID_RE = re.compile(r"S-\d{5}")
+STORY_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 TASK_FILE_RE = re.compile(r"^(T-\d{5})(?:-[A-Za-z0-9][A-Za-z0-9._-]*)?\.md$")
 TITLE_RE = re.compile(r"^# Task:\s+(T-\d{5})(?:\s+(.+))?$")
 METADATA_RE = re.compile(
@@ -249,6 +254,86 @@ def load_tasks(directory: str | Path) -> ReadResult:
     return ReadResult(tasks, tuple(warnings))
 
 
+def load_stories(path: str | Path) -> ReadResult:
+    """Read only the fixed-shape Story Index, failing closed on any deviation."""
+    story_path = Path(path)
+    try:
+        info = story_path.lstat()
+    except FileNotFoundError:
+        return ReadResult([], ("STORIES_MISSING",))
+    except OSError:
+        return ReadResult([], ("STORIES_NOT_REGULAR",))
+    if stat.S_ISLNK(info.st_mode):
+        return ReadResult([], ("STORIES_SYMLINK",))
+    if not stat.S_ISREG(info.st_mode):
+        return ReadResult([], ("STORIES_NOT_REGULAR",))
+    if info.st_size > MAX_STORIES_FILE_BYTES:
+        return ReadResult([], ("STORIES_TOO_LARGE",))
+    try:
+        descriptor = os.open(
+            story_path,
+            os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode):
+                return ReadResult([], ("STORIES_NOT_REGULAR",))
+            payload = handle.read(MAX_STORIES_FILE_BYTES + 1)
+    except OSError:
+        return ReadResult([], ("STORIES_SYMLINK",))
+    if len(payload) > MAX_STORIES_FILE_BYTES:
+        return ReadResult([], ("STORIES_TOO_LARGE",))
+    try:
+        lines = payload.decode("utf-8").splitlines()
+    except UnicodeDecodeError:
+        return ReadResult([], ("STORIES_UTF8",))
+
+    header = "| Story | Status | Topic | Last Updated | Resume From |"
+    divider = "| --- | --- | --- | --- | --- |"
+    if len(lines) < 4 or lines[:4] != ["# Story Index", "", header, divider]:
+        return ReadResult([], ("STORIES_HEADER",))
+
+    stories: list[dict[str, str]] = []
+    story_ids: set[str] = set()
+    for line in lines[4:]:
+        if not line.startswith("|") or not line.endswith("|"):
+            return ReadResult([], ("STORIES_ROW",))
+        fields = [field.strip() for field in line.split("|")[1:-1]]
+        if len(fields) != 5:
+            return ReadResult([], ("STORIES_ROW",))
+        story_id, status, topic, last_updated, resume_from = fields
+        if (
+            STORY_ID_RE.fullmatch(story_id) is None
+            or status not in {"ACTIVE", "PAUSED", "DONE"}
+            or STORY_DATE_RE.fullmatch(last_updated) is None
+            or len(topic) > 160
+            or len(resume_from) > 320
+        ):
+            return ReadResult([], ("STORIES_ROW",))
+        try:
+            date.fromisoformat(last_updated)
+        except ValueError:
+            return ReadResult([], ("STORIES_ROW",))
+        if story_id in story_ids:
+            return ReadResult([], ("STORIES_DUPLICATE_ID",))
+        story_ids.add(story_id)
+        stories.append(
+            {
+                "id": story_id,
+                "status": status,
+                "topic": topic,
+                "last_updated": last_updated,
+                "resume_from": resume_from,
+            }
+        )
+        if len(stories) > MAX_STORIES:
+            return ReadResult([], ("STORIES_LIMIT",))
+
+    order = {"ACTIVE": 0, "PAUSED": 1, "DONE": 2}
+    stories.sort(key=lambda story: (order[story["status"]], -date.fromisoformat(story["last_updated"]).toordinal(), story["id"]))
+    return ReadResult(stories, ())
+
+
 def _parse_task(path: Path, filename_id: str) -> dict[str, Any]:
     text = _read_regular_utf8(path, "TASK")
     lines = text.splitlines()
@@ -404,6 +489,7 @@ def build_dashboard(
     roadmap_path: str | Path,
     tasks_directory: str | Path,
     product_roadmap_path: str | Path | None = None,
+    stories_path: str | Path | None = None,
 ) -> dict[str, Any]:
     task_result = load_tasks(tasks_directory)
     tasks_by_id: dict[str, dict[str, Any]] = task_result.value
@@ -421,6 +507,17 @@ def build_dashboard(
     product_roadmap, product_summary, product_warnings = _aggregate_roadmap(
         product_result, tasks_by_id
     )
+    story_result = (
+        load_stories(stories_path)
+        if stories_path is not None
+        else ReadResult([], ("STORIES_MISSING",))
+    )
+    story_summary = {
+        "total": len(story_result.value),
+        "active": sum(story["status"] == "ACTIVE" for story in story_result.value),
+        "paused": sum(story["status"] == "PAUSED" for story in story_result.value),
+        "done": sum(story["status"] == "DONE" for story in story_result.value),
+    }
 
     return {
         "data_status": "warning" if warnings else "ok",
@@ -432,4 +529,7 @@ def build_dashboard(
         "product_warnings": product_warnings,
         "product_summary": product_summary,
         "product_roadmap": product_roadmap,
+        "stories": story_result.value,
+        "story_summary": story_summary,
+        "story_warnings": list(story_result.warnings),
     }

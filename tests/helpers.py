@@ -71,3 +71,17 @@ def roadmap_toml(items: list[dict] | None = None) -> str:
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def story_index(rows: list[tuple[str, str, str, str, str]] | None = None) -> str:
+    selected = rows if rows is not None else [
+        ("S-00001", "ACTIVE", "Visible story", "2026-09-14", "Continue safely"),
+    ]
+    lines = [
+        "# Story Index",
+        "",
+        "| Story | Status | Topic | Last Updated | Resume From |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in selected)
+    return "\n".join(lines) + "\n"

@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from k3ops.data import LIFECYCLE_STATUSES, build_dashboard, load_roadmap, load_tasks
-from tests.helpers import roadmap_toml, task_markdown, write_task
+from k3ops.data import LIFECYCLE_STATUSES, build_dashboard, load_roadmap, load_stories, load_tasks
+from tests.helpers import roadmap_toml, story_index, task_markdown, write_task
 
 
 class DataTests(unittest.TestCase):
@@ -22,6 +22,8 @@ class DataTests(unittest.TestCase):
         self.roadmap.write_text(roadmap_toml(), encoding="utf-8")
         self.product_roadmap = self.root / "product.toml"
         self.product_roadmap.write_text(roadmap_toml(), encoding="utf-8")
+        self.stories = self.root / "INDEX.md"
+        self.stories.write_text(story_index(), encoding="utf-8")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -270,6 +272,63 @@ class DataTests(unittest.TestCase):
         with patch("k3ops.data.MAX_FILE_BYTES", 20):
             oversized = load_roadmap(self.product_roadmap, kind="PRODUCT_ROADMAP")
         self.assertEqual(("PRODUCT_ROADMAP_TOO_LARGE",), oversized.warnings)
+
+    def test_stories_are_sorted_and_summarized_without_extra_content(self):
+        self.stories.write_text(
+            story_index(
+                [
+                    ("S-00003", "DONE", "Done", "2026-09-13", "Finished"),
+                    ("S-00002", "ACTIVE", "Older", "2026-09-12", "Continue"),
+                    ("S-00001", "ACTIVE", "Newer", "2026-09-14", "Continue"),
+                    ("S-00004", "PAUSED", "Paused", "2026-09-14", "Wait"),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        result = build_dashboard(self.roadmap, self.tasks, self.product_roadmap, self.stories)
+        self.assertEqual(["S-00001", "S-00002", "S-00004", "S-00003"], [story["id"] for story in result["stories"]])
+        self.assertEqual({"total": 4, "active": 2, "paused": 1, "done": 1}, result["story_summary"])
+        self.assertEqual([], result["story_warnings"])
+
+    def test_empty_story_index_and_all_story_warnings_fail_closed(self):
+        self.stories.write_text(story_index([]), encoding="utf-8")
+        self.assertEqual([], load_stories(self.stories).value)
+        self.stories.unlink()
+        self.assertEqual(("STORIES_MISSING",), load_stories(self.stories).warnings)
+        self.stories.mkdir()
+        self.assertEqual(("STORIES_NOT_REGULAR",), load_stories(self.stories).warnings)
+        self.stories.rmdir()
+        self.stories.write_bytes(b"\xff\xfe")
+        self.assertEqual(("STORIES_UTF8",), load_stories(self.stories).warnings)
+        self.stories.write_text("# Wrong\n", encoding="utf-8")
+        self.assertEqual(("STORIES_HEADER",), load_stories(self.stories).warnings)
+        self.stories.write_text(story_index() + "not a table row\n", encoding="utf-8")
+        self.assertEqual(("STORIES_ROW",), load_stories(self.stories).warnings)
+        self.stories.write_text(
+            story_index(
+                [
+                    ("S-00001", "ACTIVE", "One", "2026-09-14", "Continue"),
+                    ("S-00001", "DONE", "Two", "2026-09-13", "Finished"),
+                ]
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(("STORIES_DUPLICATE_ID",), load_stories(self.stories).warnings)
+        self.stories.write_text(story_index(), encoding="utf-8")
+        with patch("k3ops.data.MAX_STORIES_FILE_BYTES", 10):
+            self.assertEqual(("STORIES_TOO_LARGE",), load_stories(self.stories).warnings)
+        with patch("k3ops.data.MAX_STORIES", 0):
+            self.assertEqual(("STORIES_LIMIT",), load_stories(self.stories).warnings)
+
+    def test_story_symlinks_are_rejected(self):
+        outside = self.root / "outside-index.md"
+        outside.write_text(story_index(), encoding="utf-8")
+        self.stories.unlink()
+        try:
+            self.stories.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable")
+        self.assertEqual(("STORIES_SYMLINK",), load_stories(self.stories).warnings)
 
 
 if __name__ == "__main__":

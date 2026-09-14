@@ -20,6 +20,7 @@ def create_app(config: dict | None = None) -> Flask:
             "K3OPS_PRODUCT_ROADMAP_PATH", "/data/roadmap/product.toml"
         ),
         TASKS_DIRECTORY=os.environ.get("K3OPS_TASKS_DIR", "/data/tasks"),
+        STORIES_INDEX_PATH=os.environ.get("K3OPS_STORIES_INDEX_PATH", "/data/stories/INDEX.md"),
     )
     if config:
         app.config.update(config)
@@ -43,6 +44,7 @@ def create_app(config: dict | None = None) -> Flask:
             app.config["ROADMAP_PATH"],
             app.config["TASKS_DIRECTORY"],
             app.config["PRODUCT_ROADMAP_PATH"],
+            app.config["STORIES_INDEX_PATH"],
         )
 
     @app.get("/")

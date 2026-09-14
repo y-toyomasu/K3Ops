@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from k3ops.app import create_app
-from tests.helpers import roadmap_toml, write_task
+from tests.helpers import roadmap_toml, story_index, write_task
 
 
 class ApiTests(unittest.TestCase):
@@ -19,6 +19,8 @@ class ApiTests(unittest.TestCase):
         self.roadmap.write_text(roadmap_toml(), encoding="utf-8")
         self.product_roadmap = self.root / "product.toml"
         self.product_roadmap.write_text(roadmap_toml(), encoding="utf-8")
+        self.stories = self.root / "INDEX.md"
+        self.stories.write_text(story_index(), encoding="utf-8")
         write_task(
             self.tasks,
             "T-00001",
@@ -32,6 +34,7 @@ class ApiTests(unittest.TestCase):
                 "ROADMAP_PATH": str(self.roadmap),
                 "PRODUCT_ROADMAP_PATH": str(self.product_roadmap),
                 "TASKS_DIRECTORY": str(self.tasks),
+                "STORIES_INDEX_PATH": str(self.stories),
             }
         )
         self.client = self.app.test_client()
@@ -72,6 +75,9 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn(str(self.root), serialized)
         self.assertIn("product_summary", data)
         self.assertIn("product_roadmap", data)
+        self.assertEqual("S-00001", data["stories"][0]["id"])
+        self.assertEqual({"total": 1, "active": 1, "paused": 0, "done": 0}, data["story_summary"])
+        self.assertEqual([], data["story_warnings"])
         self.assertNotIn("references", serialized)
 
     def test_invalid_data_returns_warning_without_raw_error(self):
@@ -101,9 +107,22 @@ class ApiTests(unittest.TestCase):
         self.assertIn("Product Roadmap", html)
         self.assertIn("Development Operations Roadmap", html)
         self.assertIn("Tasks", html)
+        self.assertIn("Stories", html)
+        self.assertIn('id="stories-section"', html)
         self.assertIn("DONE", html)
         self.assertIn("PLANNED", html)
         self.assertNotIn("private-body-marker", html)
+
+    def test_story_warning_keeps_the_existing_dashboard_visible(self):
+        self.stories.write_text("# Wrong\n", encoding="utf-8")
+        payload = self.client.get("/api/dashboard").get_json()
+        self.assertEqual([], payload["stories"])
+        self.assertEqual({"total": 0, "active": 0, "paused": 0, "done": 0}, payload["story_summary"])
+        self.assertEqual(["STORIES_HEADER"], payload["story_warnings"])
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('id="stories-warning"', html)
+        self.assertIn("Storyはありません", html)
+        self.assertIn("Tasks", html)
         self.assertIn('id="roadmap-search"', html)
         self.assertIn('id="product-roadmap-search"', html)
         self.assertIn('id="product-workstream-filter"', html)
