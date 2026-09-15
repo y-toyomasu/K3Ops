@@ -55,6 +55,7 @@ def _write_record(directory: Path, record: dict[str, str]) -> bool:
     lock_path = _acquire_lock(directory)
     if lock_path is None:
         return False
+    pending_path: Path | None = None
     try:
         reference = record["observation_reference"]
         with tempfile.NamedTemporaryFile(
@@ -66,6 +67,7 @@ def _write_record(directory: Path, record: dict[str, str]) -> bool:
             os.fsync(pending.fileno())
             pending_path = Path(pending.name)
         os.replace(pending_path, directory / f"{reference}.json")
+        pending_path = None
         records = sorted(
             (path for path in directory.glob("OBS-*.json") if path.is_file()),
             key=lambda path: (path.stat().st_mtime, path.name),
@@ -80,6 +82,11 @@ def _write_record(directory: Path, record: dict[str, str]) -> bool:
     except OSError:
         return False
     finally:
+        if pending_path is not None:
+            try:
+                pending_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         try:
             lock_path.unlink(missing_ok=True)
         except OSError:

@@ -34,13 +34,26 @@ class AgentObservationTests(unittest.TestCase):
         return sorted(self.runtime.glob("OBS-*.json"))
 
     def test_only_model_is_recorded_and_context_is_minimal(self):
+        drive_path = "".join((chr(67), chr(58), chr(92), "private", chr(92), "path"))
+        forbidden_values = {
+            "session_id": "private-session-marker",
+            "agent_id": "private-agent-marker",
+            "prompt": "private-prompt-marker",
+            "transcript_path": "private-transcript-marker",
+            "command": "private-command-marker",
+            "error": "private-error-marker",
+            "host_path": drive_path,
+            "secret": "private-secret-marker",
+            "credential": "private-credential-marker",
+            "token": "private-token-marker",
+            "flag": "private-flag-marker",
+            "private_thought": "private-thought-marker",
+            "reasoning_effort": "private-reasoning-marker",
+        }
         record = handler.observe(
             {
                 "model": "gpt-5.6-terra",
-                "session_id": "must-not-persist",
-                "agent_id": "must-not-persist",
-                "prompt": "must-not-persist",
-                "reasoning_effort": "must-not-persist",
+                **forbidden_values,
             }
         )
         self.assertIsNotNone(record)
@@ -51,7 +64,7 @@ class AgentObservationTests(unittest.TestCase):
         self.assertTrue(persisted["observed_at"].endswith("Z"))
         self.assertRegex(persisted["observation_reference"], r"^OBS-[0-9a-f]{32}$")
         serialized = json.dumps(persisted)
-        for forbidden in ("session_id", "agent_id", "prompt", "reasoning_effort", "must-not-persist"):
+        for forbidden in forbidden_values.values():
             self.assertNotIn(forbidden, serialized)
         with patch.object(handler, "observe", return_value=record), patch("sys.stdin", io.StringIO('{"model":"gpt-5.6-terra"}')):
             output = io.StringIO()
@@ -62,6 +75,8 @@ class AgentObservationTests(unittest.TestCase):
             f"Observation Reference: {record['observation_reference']}\nObserved Model: gpt-5.6-terra",
             context,
         )
+        for forbidden in forbidden_values.values():
+            self.assertNotIn(forbidden, output.getvalue())
 
     def test_invalid_input_and_runtime_failure_are_non_blocking(self):
         self.assertIsNone(handler.observe({"model": "unsafe model value"}))
@@ -94,6 +109,26 @@ class AgentObservationTests(unittest.TestCase):
         self.assertIn(self.runtime / f"{record['observation_reference']}.json", records)
         self.assertFalse(any(path.name.startswith(".pending-") for path in self.runtime.iterdir()))
         self.assertFalse((self.runtime / ".observation.lock").exists())
+
+    def test_lock_conflict_and_atomic_replace_failure_are_non_blocking(self):
+        self.runtime.mkdir(parents=True)
+        (self.runtime / ".observation.lock").write_text("held", encoding="utf-8")
+        with patch("sys.stdin", io.StringIO('{"model":"gpt-5.6-terra"}')):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(0, handler.main())
+        self.assertEqual("", output.getvalue())
+        self.assertEqual([], self._records())
+        (self.runtime / ".observation.lock").unlink()
+
+        with patch.object(handler.os, "replace", side_effect=OSError):
+            with patch("sys.stdin", io.StringIO('{"model":"gpt-5.6-terra"}')):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(0, handler.main())
+        self.assertEqual("", output.getvalue())
+        self.assertEqual([], self._records())
+        self.assertFalse(any(path.name.startswith(".pending-") for path in self.runtime.iterdir()))
 
     def test_task_sentinel_and_standard_synthetic_inputs_share_the_contract(self):
         standard = handler.observe({"model": "gpt-5.6-terra", "parent": "standard"})
