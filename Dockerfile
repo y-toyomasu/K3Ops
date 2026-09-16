@@ -9,6 +9,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY k3ops ./k3ops
+COPY ops ./ops
 COPY tests ./tests
 
 RUN useradd --create-home --uid 10001 k3ops
