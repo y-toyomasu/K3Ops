@@ -138,6 +138,14 @@ class ApiTests(unittest.TestCase):
         self.assertIn("nonce=", html)
         self.assertNotIn("private-body-marker", html)
 
+    def test_task_filter_selector_excludes_story_rows(self):
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn("document.querySelectorAll('tr[data-task-id]')", html)
+        self.assertIn('<tr data-task-id="T-00001"', html)
+        story_row = '<td class="task-id">S-00001</td>'
+        self.assertIn(story_row, html)
+        self.assertNotIn('<tr data-task-id="S-00001"', html)
+
     def test_product_and_operations_failures_are_separate(self):
         self.product_roadmap.write_text("broken = [toml", encoding="utf-8")
         product_invalid = self.client.get("/api/dashboard").get_json()
